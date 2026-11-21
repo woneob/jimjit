@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# build / coverage
+dist/
+coverage/
+.nyc_output/
+*.tgz
+
+# env
+.env
+.env.*
+!.env.example
+
+# editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
