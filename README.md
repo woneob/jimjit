@@ -34,9 +34,15 @@ Node.js 18 이상이면 됩니다. 의존성은 없습니다.
 ### 명령줄 (CLI)
 
 ```bash
-node bin/cli.js "텍스트" --level 5
-node bin/cli.js --file 글.txt --level 3 --profile work --keep "디지털 멀미" --report
-node bin/cli.js --list   # 프로필, 실수 규칙, 오류 id 목록
+npm install -g jimjit
+```
+
+설치하지 않고 한 번만 써 보려면 `jimjit` 대신 `npx jimjit`으로 실행하세요.
+
+```bash
+jimjit "텍스트" --level 5
+jimjit --file 글.txt --level 3 --profile work --keep "디지털 멀미" --report
+jimjit --list   # 프로필, 실수 규칙, 오류 id 목록
 ```
 
 바꿀 글은 인자, `--file`, 파이프 중 하나로 넣습니다. 옵션은 모두 선택입니다.
@@ -72,6 +78,10 @@ node bin/cli.js --list   # 프로필, 실수 규칙, 오류 id 목록
 예: `--without period`는 마침표는 그대로 두고, `--only slips`는 오타만 넣습니다.
 
 ### JavaScript API
+
+```bash
+npm install jimjit
+```
 
 ```js
 import { jimjit } from 'jimjit';
