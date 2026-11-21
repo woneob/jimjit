@@ -1,0 +1,41 @@
+{
+  "name": "jimjit",
+  "version": "0.1.0",
+  "description": "한국어 글에 사람의 실수(오타, 몰라서 틀리는 맞춤법·어휘, 띄어쓰기·마침표 습관)를 의도적으로 입히는 도구",
+  "keywords": [
+    "korean",
+    "hangul",
+    "typo",
+    "humanize",
+    "text"
+  ],
+  "homepage": "https://github.com/woneob/jimjit#readme",
+  "bugs": {
+    "url": "https://github.com/woneob/jimjit/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/woneob/jimjit.git"
+  },
+  "license": "MIT",
+  "author": "1UP",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "bin": {
+    "jimjit": "bin/cli.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "SKILL.md"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
