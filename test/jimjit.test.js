@@ -173,6 +173,46 @@ test('보호 구간 분리', () => {
   assert.deepEqual(segs.map((s) => s.protected), [false, true, false, true, false]);
 });
 
+test('마크다운 코드 블록과 인라인 코드는 보호한다', () => {
+  const prot = (text) => segment(text, []).filter((s) => s.protected).map((s) => s.text);
+  // 펜스: ``` / ~~~, 정보 문자열, 더 긴 닫는 펜스, 닫지 않은 펜스
+  assert.deepEqual(prot('가\n```js\n괜찮아\n```\n나'), ['```js\n괜찮아\n```']);
+  assert.deepEqual(prot('가\n~~~\n괜찮아\n~~~~\n나'), ['~~~\n괜찮아\n~~~~']);
+  assert.deepEqual(prot('가\n````\n```\n괜찮아\n````'), ['````\n```\n괜찮아\n````']);
+  assert.deepEqual(prot('가\n```\n괜찮아 끝까지'), ['```\n괜찮아 끝까지']);
+  // 들여쓰기: 빈 줄 다음만, 중간 빈 줄 포함
+  assert.deepEqual(prot('가\n\n    괜찮아\n\n\t진짜\n나'), ['    괜찮아\n\n\t진짜']);
+  assert.deepEqual(prot('가\n    문단 이어짐'), []);
+  // 인라인: 백틱 개수 맞추기, 빈 줄은 넘지 않음
+  assert.deepEqual(prot('a ``b ` c`` d'), ['``b ` c``']);
+  assert.deepEqual(prot('a `b\n\nc` d'), []);
+});
+
+test('HTML 태그와 파일 경로는 보호한다', () => {
+  const prot = (text) => segment(text, []).filter((s) => s.protected).map((s) => s.text);
+  // HTML: 태그·주석은 지키고, 태그 사이 본문은 글로 둔다. pre/code/script/style은 안쪽까지
+  assert.deepEqual(prot('<span title="괜찮아">괜찮아</span>'), ['<span title="괜찮아">', '</span>']);
+  assert.deepEqual(prot('가 <!-- 괜찮아 --> 나 <pre>괜찮아\n진짜</pre>'), ['<!-- 괜찮아 -->', '<pre>괜찮아\n진짜</pre>']);
+  assert.deepEqual(prot('3 < 5 이고 괜찮아 > 진짜'), []);
+  // 경로
+  assert.deepEqual(prot('C:\\문서\\괜찮아.txt 를 열어요.'), ['C:\\문서\\괜찮아.txt']);
+  assert.deepEqual(prot('\\\\서버\\공유\\파일.hwp 에'), ['\\\\서버\\공유\\파일.hwp']);
+  assert.deepEqual(prot('/etc/hosts, ./src/a.js, ../문서/계획.md, ~/메모.md'), ['/etc/hosts', './src/a.js', '../문서/계획.md', '~/메모.md']);
+  assert.deepEqual(prot('src/index.js 와 문서\\계획.docx, 보고서.docx를 보냈다.'), ['src/index.js', '문서\\계획.docx', '보고서.docx']);
+  assert.deepEqual(prot('(C:\\a\\b.txt) 끝'), ['C:\\a\\b.txt']);
+  // 경로가 아닌 것
+  assert.deepEqual(prot('A/B 테스트, 그리고/또는, 1/2, 3.5배, 했다.그리고'), []);
+});
+
+test('코드 안의 글은 레벨 10에서도 바뀌지 않는다', () => {
+  const codes = ['```\n괜찮아 진짜 할 수 있어 됐다\n```', '~~~\n괜찮아 진짜 할 수 있어 됐다\n~~~', '    괜찮아 진짜 할 수 있어 됐다', '`괜찮아 진짜 할 수 있어`'];
+  const text = `설명입니다.\n\n${codes.join('\n\n')}\n\n괜찮아 진짜 할 수 있어.`;
+  for (let seed = 1; seed <= 100; seed++) {
+    const out = jimjit(text, { level: 10, seed }).text;
+    for (const c of codes) assert.ok(out.includes(c), `seed ${seed}: ${c}`);
+  }
+});
+
 test('잘못된 옵션은 알기 쉬운 오류를 낸다', () => {
   assert.throws(() => jimjit('가', { profile: 'nope' }), /프로필/);
   assert.throws(() => jimjit('가', { only: ['nope'] }), /규칙/);

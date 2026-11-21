@@ -71,10 +71,16 @@ function printReport(r) {
   // 사람이 "모르는 것" 중 이 글에 실제로 드러난 것만 보여 준다
   const shown = [...new Set(r.changes.filter((c) => c.category === '몰라서 틀림').map((c) => c.rule.split(': ')[1]))];
   const lines = [
-    `seed ${r.seed} · 레벨 ${r.level} · 프로필 ${PROFILES[r.profile].label}(${r.profile})`,
-    `이 사람: 모르는 것 ${r.person.misconceptions.length}개 중 이 글에 드러난 것 [${shown.join(', ') || '없음'}] · 띄어쓰기 붙임 ${yn(h.spacing)} · 마침표 생략 ${yn(h.period)} · 번역투 ${yn(h.translationese)}`,
+    '',
+    `Seed: ${r.seed}`,
+    `Level: ${r.level}`,
+    `Profile: ${r.profile}`,
+    '',
+    '글쓴이 설정',
+    `  - 잘못 아는 표현 ${r.person.misconceptions.length}개${shown.length ? ` (이 글에 드러난 것: ${shown.join(', ')})` : ''}`,
+    `  - 습관: 띄어쓰기 붙임 ${yn(h.spacing)} · 마침표 생략 ${yn(h.period)} · 번역투 ${yn(h.translationese)}`,
     `실수 ${r.stats.flaws}개 / 어절 ${r.stats.words}개 (${(r.stats.rate * 100).toFixed(1)}%)`,
-    ...r.changes.map((c) => `  - ${c.category.padEnd(6)} ${c.rule}: ${c.from} → ${c.to}`),
+    ...r.changes.map((c) => `  - [${c.category}] ${c.rule} (${c.from} → ${c.to})`),
   ];
   process.stderr.write(lines.join('\n') + '\n');
 }
@@ -105,6 +111,8 @@ async function main() {
   if (opts.json) {
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   } else {
+    // 머리말은 리포트와 함께 stderr로 보낸다. stdout에는 결과 글만 남아야 파이프·파일 저장이 깨끗하다
+    if (opts.report) process.stderr.write('\nresult:\n');
     process.stdout.write(result.text.endsWith('\n') ? result.text : `${result.text}\n`);
   }
   if (opts.report) printReport(result);
