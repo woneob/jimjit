@@ -20,8 +20,8 @@ const HELP = `jimjit — 글에 사람의 실수(오타, 맞춤법 혼동, 습�
       --only <규칙,…>    이 실수 규칙만 사용
       --without <규칙,…> 이 실수 규칙은 끔
       --with <규칙,…>    기본 꺼진 실수 규칙을 켬 (translationese)
-      --mis <id,…>       "모르는 것"을 이 오류들로만 고정 (예: 됬,할께)
-  -r, --report           무엇을 어떻게 바꿨는지 stderr에 출력
+      --mis <id,…>       "잘못 알고 있는 표현"을 이 오류들로만 고정 (예: 됬,할께)
+  -r, --report           글쓴이 컨셉과 바꾼 내용을 stderr에 출력
       --json             결과 전체를 JSON으로 출력
       --list             프로필, 실수 규칙, 오류 id 목록
   -h, --help             도움말
@@ -65,22 +65,113 @@ function printList() {
   for (const m of MISCONCEPTIONS) console.log(`  ${m.id.padEnd(8)} ${m.kind}${m.risk === 'high' ? ` · 오해 소지 큼(레벨 ${HIGH_RISK_LEVEL}+)` : ''}`);
 }
 
+// 습관 → 리포트 문장. 자리마다 나타날 확률이 85~100%라 "자주"로 적는다
+const HABIT_TEXT = {
+  spacing: '띄어 써야 할 곳을 자주 붙여 쓰고, 가끔은 붙여 쓸 곳을 띄움',
+  period: '문장 끝 마침표를 자주 생략함',
+  translationese: '번역투 표현을 씀',
+};
+
+// 오류 id → "맞는 형태 → 틀린 형태". id는 대개 틀린 형태의 온전한 단어(어쨋든)라서,
+// 사전의 쌍을 거꾸로 적용해 맞는 형태(어쨌든)를 만든다. 안 되면 첫 쌍을 그대로 보여 준다.
+const MISCONCEPTION_BY_ID = new Map(MISCONCEPTIONS.map((m) => [m.id, m]));
+function misconceptionLabel(id) {
+  const m = MISCONCEPTION_BY_ID.get(id);
+  if (m.example) return `${m.example[0]} → ${m.example[1]}`;
+  const hit = m.pairs.find(([, wrong]) => id.includes(wrong.trim()));
+  const [right, wrong] = hit ? [id.replace(hit[1].trim(), hit[0].trim()), id] : m.pairs[0];
+  return `${right.trim()} → ${wrong.trim()}`;
+}
+
+// ── 상자 그리기 ──
+// 터미널에서 한글·한자 같은 전각 문자는 두 칸을 차지한다. 칸 수로 맞춰야 오른쪽 테두리가 줄을 맞춘다.
+const isWide = (cp) =>
+  (cp >= 0x1100 && cp <= 0x115f) || (cp >= 0x2e80 && cp <= 0xa4cf) || (cp >= 0xac00 && cp <= 0xd7a3) ||
+  (cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0xfe30 && cp <= 0xfe4f) || (cp >= 0xff00 && cp <= 0xff60) || (cp >= 0xffe0 && cp <= 0xffe6);
+const width = (s) => [...s].reduce((w, ch) => w + (isWide(ch.codePointAt(0)) ? 2 : 1), 0);
+const padEnd = (s, w) => s + ' '.repeat(Math.max(0, w - width(s)));
+
+// 상자 안 여백: 좌우 칸 수, 구역마다 위아래 빈 줄
+const PAD = 2;
+const GAP = '   '; // 목록 항목 사이
+// 상자 안쪽(여백 제외) 최대 폭. 터미널이 좁으면 거기에 맞춘다
+const MAX_INNER = Math.max(36, Math.min(70, (process.stderr.columns || 80) - 2 - PAD * 2));
+
+// 항목들을 GAP으로 이어 폭에 맞게 여러 줄로 나눈다
+function wrapItems(items, max) {
+  const lines = [];
+  let cur = '';
+  for (const it of items) {
+    const next = cur ? cur + GAP + it : it;
+    if (cur && width(next) > max) {
+      lines.push(cur);
+      cur = it;
+    } else cur = next;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+// 테두리는 흐리게 (회색). 터미널일 때만, NO_COLOR가 있으면 끈다 (https://no-color.org)
+const COLOR = process.stderr.isTTY && !('NO_COLOR' in process.env);
+const dim = (s) => (COLOR ? `\x1b[90m${s}\x1b[39m` : s);
+
+// 비어 있음을 알리는 줄 (특별한 습관 없음, 저지른 실수가 없음). 흐리게 보여 준다
+const empty = (text) => ({ text, empty: true });
+const textOf = (l) => (typeof l === 'string' ? l : l.text);
+
+// 상자 안쪽(여백 제외)에 필요한 폭: 가장 긴 줄, 또는 테두리에 박힌 제목
+const innerWidth = (sections) =>
+  Math.max(...sections.flatMap((s) => [...s.lines.map((l) => width(textOf(l))), s.title ? width(s.title) + 2 : 0]));
+
+// sections: [{ title?, lines }] → 제목이 테두리에 박힌 상자. 구역 사이는 ├─┤ 로 나눈다
+// inner를 주면 그 폭으로 그린다 (여러 상자의 너비를 맞출 때)
+function box(sections, inner = innerWidth(sections)) {
+  const full = inner + PAD * 2;
+  // 제목은 흐리게 하지 않는다
+  const rule = (l, r, title) =>
+    title ? `${dim(`${l}─ `)}${title}${dim(` ${'─'.repeat(full - 3 - width(title))}${r}`)}` : dim(`${l}${'─'.repeat(full)}${r}`);
+  const row = (l) => {
+    const text = padEnd(textOf(l), inner);
+    return `${dim('│')}${' '.repeat(PAD)}${l.empty ? dim(text) : text}${' '.repeat(PAD)}${dim('│')}`;
+  };
+  const out = [];
+  sections.forEach((s, i) => {
+    out.push(i === 0 ? rule('┌', '┐', s.title) : rule('├', '┤', s.title));
+    out.push(row(''), ...s.lines.map(row), row(''));
+  });
+  out.push(rule('└', '┘'));
+  return out;
+}
+
 function printReport(r) {
-  const h = r.person.habits;
-  const yn = (b) => (b ? 'O' : 'X');
-  // 사람이 "모르는 것" 중 이 글에 실제로 드러난 것만 보여 준다
-  const shown = [...new Set(r.changes.filter((c) => c.category === '몰라서 틀림').map((c) => c.rule.split(': ')[1]))];
+  // "잘못 알고 있는 표현" 중 이 글에 실제로 드러난 것
+  const shown = new Set(r.changes.filter((c) => c.category === '몰라서 틀림').map((c) => c.rule.split(': ')[1]));
+  const mis = r.person.misconceptions;
+  const habits = Object.keys(HABIT_TEXT).filter((k) => r.person.habits[k]);
+  const concept = [
+    {
+      title: mis.length ? `잘못 알고 있는 표현 ${mis.length}개${shown.size ? ' (* 이 글에 드러난 것)' : ''}` : '잘못 알고 있는 표현',
+      lines: mis.length ? wrapItems(mis.map((id) => misconceptionLabel(id) + (shown.has(id) ? '*' : '')), MAX_INNER) : [empty('없음')],
+    },
+    { title: '성향', lines: habits.length ? habits.map((k) => HABIT_TEXT[k]) : [empty('특별한 습관 없음')] },
+  ];
+  const mistakes = [
+    { lines: r.changes.length ? r.changes.map((c) => `[${c.category}] ${c.rule} (${c.from} → ${c.to})`) : [empty('저지른 실수가 없음')] },
+  ];
+  // 두 상자를 더 넓은 쪽 너비로 맞춘다
+  const inner = Math.max(innerWidth(concept), innerWidth(mistakes));
   const lines = [
     '',
-    `Seed: ${r.seed}`,
-    `Level: ${r.level}`,
-    `Profile: ${r.profile}`,
+    `• Seed: ${r.seed}`,
+    `• Level: ${r.level}`,
+    `• Profile: ${r.profile}`,
     '',
-    '글쓴이 설정',
-    `  - 잘못 아는 표현 ${r.person.misconceptions.length}개${shown.length ? ` (이 글에 드러난 것: ${shown.join(', ')})` : ''}`,
-    `  - 습관: 띄어쓰기 붙임 ${yn(h.spacing)} · 마침표 생략 ${yn(h.period)} · 번역투 ${yn(h.translationese)}`,
-    `실수 ${r.stats.flaws}개 / 어절 ${r.stats.words}개 (${(r.stats.rate * 100).toFixed(1)}%)`,
-    ...r.changes.map((c) => `  - [${c.category}] ${c.rule} (${c.from} → ${c.to})`),
+    '글쓴이 컨셉',
+    ...box(concept, inner),
+    '',
+    `실수 ${r.stats.flaws}개`,
+    ...box(mistakes, inner),
   ];
   process.stderr.write(lines.join('\n') + '\n');
 }

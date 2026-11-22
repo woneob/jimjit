@@ -213,6 +213,24 @@ test('코드 안의 글은 레벨 10에서도 바뀌지 않는다', () => {
   }
 });
 
+test('띄어쓰기 습관: 패턴으로 붙이고, 낱말 안을 띄운다', () => {
+  const pick = (text, rule) => {
+    const seen = new Set();
+    for (let seed = 1; seed <= 200; seed++) {
+      for (const c of jimjit(text, { level: 10, seed, only: ['spacing'] }).changes) if (c.rule.startsWith(rule)) seen.add(`${c.from}→${c.to}`);
+    }
+    return seen;
+  };
+  const joined = pick('먹을 수 있다. 본 적 있어. 써 줘. 두 시간 걸려. 보내 드릴게요.', '띄어 쓸 곳을 붙임');
+  for (const s of ['을 수→을수', '본 적→본적', '써 줘→써줘', '두 시간→두시간', '내 드릴→내드릴']) assert.ok(joined.has(s), s);
+  const split = pick('공부하다. 학교에서 왔다.', '붙여 쓸 곳을 띄움');
+  for (const s of ['공부하다→공부 하다', '학교에서→학교 에서']) assert.ok(split.has(s), s);
+  // 붙이거나 띄우면 안 되는 것
+  // only: spacing 이라 바뀐 것은 모두 띄어쓰기 실수다
+  const none = pick('이가 보인다. 친구와 봤다. 한 지역. 내 주머니. 하늘. 올해. 대해서. 어떡해.', '');
+  assert.equal(none.size, 0, [...none].join(', '));
+});
+
 test('잘못된 옵션은 알기 쉬운 오류를 낸다', () => {
   assert.throws(() => jimjit('가', { profile: 'nope' }), /프로필/);
   assert.throws(() => jimjit('가', { only: ['nope'] }), /규칙/);

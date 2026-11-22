@@ -2,15 +2,15 @@
 //
 // 실수의 세 종류
 //   손 실수     — 무작위. 어절마다 확률적으로 (쌍자음 놓침, ㅐ/ㅔ 혼동, 겹받침 줄임 …)
-//   몰라서 틀림 — 사람 단위로 "모르는 것"을 정하고 글 전체에 일관되게 (됬, 할께, 틀리다 …)
-//   습관        — 사람 단위로 정하고 대부분의 자리에 (띄어쓰기 붙임, 마침표 생략, 번역투)
+//   몰라서 틀림 — 사람 단위로 "잘못 알고 있는 표현"을 정하고 글 전체에 일관되게 (됬, 할께, 틀리다 …)
+//   습관        — 사람 단위로 정하고 대부분의 자리에 (띄어쓰기, 마침표 생략, 번역투)
 
 import { isSyllable, decompose, compose } from './hangul.js';
 import { createRandom } from './random.js';
 import { segment, alternation } from './protect.js';
 import { PROFILES, HIGH_RISK_LEVEL, clampLevel, ratesFor } from './profiles.js';
 import { MISCONCEPTIONS } from './data/knowledge.js';
-import { SPACING, TRANSLATIONESE, HABIT_CONSISTENCY } from './data/habits.js';
+import { SPACING, SPACING_RULES, SPLIT_RULES, TRANSLATIONESE, HABIT_CONSISTENCY } from './data/habits.js';
 import {
   SHIFT_RELEASE, SHIFT_RELEASE_JONG, AE_E, VOWEL_NEIGHBORS, COMPLEX_JONG, LIAISON_JONG, NO_LIAISON, LOANWORD_HINTS,
   SLIP_WEIGHTS, BLOCKED_OUTPUTS,
@@ -168,7 +168,7 @@ function resolveEnabled({ only, without = [], with: withRules = [] }, profile) {
  * @param {string[]} [options.only]            이 실수 규칙만 사용
  * @param {string[]} [options.without]         이 실수 규칙은 끔
  * @param {string[]} [options.with]            기본 꺼진 실수 규칙을 켬 (translationese)
- * @param {string[]} [options.misconceptions]  "모르는 것"을 이 오류 id들로만 정한다 (확률로 고르지 않음)
+ * @param {string[]} [options.misconceptions]  "잘못 알고 있는 표현"을 이 오류 id들로만 정한다 (확률로 고르지 않음)
  */
 export function jimjit(text, options = {}) {
   const level = clampLevel(options.level ?? 3);
@@ -182,7 +182,7 @@ export function jimjit(text, options = {}) {
   const rates = ratesFor(level, profile, { forceTranslationese: (options.with || []).includes('translationese') });
 
   // ── 이 글을 쓴 "사람"을 먼저 정한다: 무엇을 모르고, 어떤 습관이 있나 ──
-  // misconceptions를 주면 "모르는 것"은 정확히 그 목록이다 (확률로 더 고르지 않는다)
+  // misconceptions를 주면 "잘못 알고 있는 표현"은 정확히 그 목록이다 (확률로 더 고르지 않는다)
   const forced = options.misconceptions?.length ? new Set(options.misconceptions) : null;
   for (const id of forced || []) {
     if (!MISCONCEPTIONS.some((m) => m.id === id)) throw new Error(`알 수 없는 오류 id예요: ${id}`);
@@ -204,7 +204,12 @@ export function jimjit(text, options = {}) {
   const passes = [
     ...misconceptions.map((m) => ({ ...KNOWLEDGE_PASS.get(m), category: '몰라서 틀림', rule: `${m.kind}: ${m.id}` })),
     ...(habits.translationese ? [{ ...TRANSLATIONESE_PASS, category: '습관', rule: '번역투' }] : []),
-    ...(habits.spacing ? [{ ...SPACING_PASS, category: '습관', rule: '띄어쓰기 붙임', p: HABIT_CONSISTENCY.spacing }] : []),
+    ...(habits.spacing
+      ? [
+          ...[SPACING_PASS, ...SPACING_RULES].map((r) => ({ ...r, category: '습관', rule: '띄어 쓸 곳을 붙임', p: HABIT_CONSISTENCY.spacing })),
+          ...SPLIT_RULES.map((r) => ({ ...r, category: '습관', rule: '붙여 쓸 곳을 띄움', p: HABIT_CONSISTENCY.split })),
+        ]
+      : []),
   ];
 
   const segs = segment(text, options.keep);
