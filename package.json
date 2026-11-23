@@ -1,6 +1,6 @@
 {
   "name": "jimjit",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "한국어 글에 사람의 실수(오타, 몰라서 틀리는 맞춤법·어휘, 띄어쓰기·마침표 습관)를 의도적으로 입히는 도구",
   "keywords": [
     "korean",
@@ -37,5 +37,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "diff": "9.0.0"
   }
 }

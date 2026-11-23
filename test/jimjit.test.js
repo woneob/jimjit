@@ -237,3 +237,16 @@ test('잘못된 옵션은 알기 쉬운 오류를 낸다', () => {
   assert.throws(() => jimjit('가', { misconceptions: ['nope'] }), /오류 id/);
   assert.throws(() => jimjit('가', { level: 'abc' }), /레벨/);
 });
+
+test('--diff: 고친 줄은 좌우로 짝짓고, 각 줄이 터미널 폭을 넘지 않는다', async () => {
+  const { sideBySide, pairRows, width } = await import('../bin/side-by-side.js');
+  const rows = pairRows('있으면 좋아\n그대로\n지울 줄\n', '잇으면 좋아\n그대로\n');
+  assert.deepEqual(rows.map((r) => r.type), ['mod', 'eq', 'del']);
+  assert.deepEqual(rows[0].left.segs.filter((s) => s.hl).map((s) => s.text), ['있']);
+  assert.deepEqual(rows[0].right.segs.filter((s) => s.hl).map((s) => s.text), ['잇']);
+
+  const r = jimjit(SAMPLE, { level: 7, seed: 42 });
+  for (const columns of [40, 80, 123]) {
+    for (const line of sideBySide(SAMPLE, r.text, { columns })) assert.ok(width(line) <= columns, line);
+  }
+});

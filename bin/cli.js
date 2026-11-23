@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { text as readAll } from 'node:stream/consumers';
 import { jimjit, PROFILES, MISCONCEPTIONS, RULES, HIGH_RISK_LEVEL } from '../src/index.js';
+import { sideBySide, columnWidth, width, padEnd } from './side-by-side.js';
 
 const HELP = `jimjit — 글에 사람의 실수(오타, 맞춤법 혼동, 습관)를 입힙니다
 
@@ -21,7 +22,7 @@ const HELP = `jimjit — 글에 사람의 실수(오타, 맞춤법 혼동, 습�
       --without <규칙,…> 이 실수 규칙은 끔
       --with <규칙,…>    기본 꺼진 실수 규칙을 켬 (translationese)
       --mis <id,…>       "잘못 알고 있는 표현"을 이 오류들로만 고정 (예: 됬,할께)
-  -r, --report           글쓴이 컨셉과 바꾼 내용을 stderr에 출력
+  -r, --report           글쓴이 컨셉, 바꾼 내용, 원본·결과 비교표를 stderr에 출력
       --json             결과 전체를 JSON으로 출력
       --list             프로필, 실수 규칙, 오류 id 목록
   -h, --help             도움말
@@ -83,19 +84,11 @@ function misconceptionLabel(id) {
   return `${right.trim()} → ${wrong.trim()}`;
 }
 
-// ── 상자 그리기 ──
-// 터미널에서 한글·한자 같은 전각 문자는 두 칸을 차지한다. 칸 수로 맞춰야 오른쪽 테두리가 줄을 맞춘다.
-const isWide = (cp) =>
-  (cp >= 0x1100 && cp <= 0x115f) || (cp >= 0x2e80 && cp <= 0xa4cf) || (cp >= 0xac00 && cp <= 0xd7a3) ||
-  (cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0xfe30 && cp <= 0xfe4f) || (cp >= 0xff00 && cp <= 0xff60) || (cp >= 0xffe0 && cp <= 0xffe6);
-const width = (s) => [...s].reduce((w, ch) => w + (isWide(ch.codePointAt(0)) ? 2 : 1), 0);
-const padEnd = (s, w) => s + ' '.repeat(Math.max(0, w - width(s)));
+// ── 리포트 표 ──
+// 폭은 글자 수가 아니라 칸 수(width)로 맞춘다. 한글은 두 칸
 
-// 상자 안 여백: 좌우 칸 수, 구역마다 위아래 빈 줄
-const PAD = 2;
+const PAD = 2; // 칸 안 좌우 여백
 const GAP = '   '; // 목록 항목 사이
-// 상자 안쪽(여백 제외) 최대 폭. 터미널이 좁으면 거기에 맞춘다
-const MAX_INNER = Math.max(36, Math.min(70, (process.stderr.columns || 80) - 2 - PAD * 2));
 
 // 항목들을 GAP으로 이어 폭에 맞게 여러 줄로 나눈다
 function wrapItems(items, max) {
@@ -112,66 +105,126 @@ function wrapItems(items, max) {
   return lines;
 }
 
+// 띄어쓰기 단위로 줄바꿈. 폭보다 긴 낱말은 글자 단위로 끊는다
+function wrapText(text, max) {
+  const lines = [];
+  let cur = '';
+  for (const word of text.split(' ')) {
+    const next = cur ? `${cur} ${word}` : word;
+    if (width(next) <= max) {
+      cur = next;
+      continue;
+    }
+    if (cur) lines.push(cur);
+    cur = '';
+    for (const ch of word) {
+      if (width(cur + ch) > max) {
+        lines.push(cur);
+        cur = '';
+      }
+      cur += ch;
+    }
+  }
+  lines.push(cur);
+  return lines;
+}
+
 // 테두리는 흐리게 (회색). 터미널일 때만, NO_COLOR가 있으면 끈다 (https://no-color.org)
 const COLOR = process.stderr.isTTY && !('NO_COLOR' in process.env);
 const dim = (s) => (COLOR ? `\x1b[90m${s}\x1b[39m` : s);
+const cyan = (s) => (COLOR ? `\x1b[36m${s}\x1b[39m` : s);
+const yellow = (s) => (COLOR ? `\x1b[33m${s}\x1b[39m` : s);
+const white = (s) => (COLOR ? `\x1b[97m${s}\x1b[39m` : s);
 
-// 비어 있음을 알리는 줄 (특별한 습관 없음, 저지른 실수가 없음). 흐리게 보여 준다
-const empty = (text) => ({ text, empty: true });
-const textOf = (l) => (typeof l === 'string' ? l : l.text);
+// 컬럼의 한 줄: 글, 흐린 글(empty), 가로줄(RULE)
+const RULE = { rule: true };
+const text = (t, note) => ({ text: t, note });
+const empty = (t) => ({ text: t, empty: true });
 
-// 상자 안쪽(여백 제외)에 필요한 폭: 가장 긴 줄, 또는 테두리에 박힌 제목
-const innerWidth = (sections) =>
-  Math.max(...sections.flatMap((s) => [...s.lines.map((l) => width(textOf(l))), s.title ? width(s.title) + 2 : 0]));
-
-// sections: [{ title?, lines }] → 제목이 테두리에 박힌 상자. 구역 사이는 ├─┤ 로 나눈다
-// inner를 주면 그 폭으로 그린다 (여러 상자의 너비를 맞출 때)
-function box(sections, inner = innerWidth(sections)) {
-  const full = inner + PAD * 2;
-  // 제목은 흐리게 하지 않는다
-  const rule = (l, r, title) =>
-    title ? `${dim(`${l}─ `)}${title}${dim(` ${'─'.repeat(full - 3 - width(title))}${r}`)}` : dim(`${l}${'─'.repeat(full)}${r}`);
-  const row = (l) => {
-    const text = padEnd(textOf(l), inner);
-    return `${dim('│')}${' '.repeat(PAD)}${l.empty ? dim(text) : text}${' '.repeat(PAD)}${dim('│')}`;
-  };
+// [{ title, note?, lines }] → 컬럼 줄 배열 (제목 / 가로줄 / 내용 / 빈 줄, 구역 사이 가로줄)
+function column(sections, inner) {
   const out = [];
   sections.forEach((s, i) => {
-    out.push(i === 0 ? rule('┌', '┐', s.title) : rule('├', '┤', s.title));
-    out.push(row(''), ...s.lines.map(row), row(''));
+    if (i > 0) out.push(RULE);
+    // note는 한 줄에 들어갈 때만
+    const title = wrapText(s.title, inner);
+    const last = title.pop();
+    out.push(...title.map((t) => text(t)));
+    out.push(text(last, s.note && width(last + s.note) <= inner ? s.note : ''), RULE);
+    for (const l of s.lines) {
+      if (typeof l === 'string') out.push(...wrapText(l, inner).map((t) => text(t)));
+      else out.push(...wrapText(l.text, inner).map(empty));
+    }
+    out.push(text(''));
   });
-  out.push(rule('└', '┘'));
   return out;
 }
 
-function printReport(r) {
+// 두 컬럼을 한 표로 그린다. colW를 비교표와 같게 주면 가운데 세로줄이 맞는다
+function table(left, right, colW) {
+  const inner = colW - PAD * 2;
+  const cell = (c) => {
+    if (!c || c.rule) return ' '.repeat(colW);
+    const note = c.note || '';
+    const fill = ' '.repeat(Math.max(0, inner - width(c.text + note)));
+    const body = c.empty ? dim(c.text) : c.text;
+    return ' '.repeat(PAD) + body + (note && dim(note)) + fill + ' '.repeat(PAD);
+  };
+  const line = '─'.repeat(colW);
+  const out = [dim(`┌${line}┬${line}┐`)];
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const l = left[i];
+    const r = right[i];
+    const lr = l?.rule;
+    const rr = r?.rule;
+    const mid = lr && rr ? '┼' : lr ? '┤' : rr ? '├' : '│';
+    out.push(
+      (lr ? dim(`├${line}`) : dim('│') + cell(l)) + dim(mid) + (rr ? dim(`${line}┤`) : cell(r) + dim('│')),
+    );
+  }
+  out.push(dim(`└${line}┴${line}┘`));
+  return out;
+}
+
+// 시드·레벨·프로필 → 글쓴이 컨셉 | 실수 표 → 원본·결과 비교표
+function printReport(original, r) {
+  // 파이프면 폭을 알 수 없어 80칸
+  const columns = process.stderr.columns || 80;
+  const colW = columnWidth(columns);
+  const inner = colW - PAD * 2;
   // "잘못 알고 있는 표현" 중 이 글에 실제로 드러난 것
   const shown = new Set(r.changes.filter((c) => c.category === '몰라서 틀림').map((c) => c.rule.split(': ')[1]));
   const mis = r.person.misconceptions;
   const habits = Object.keys(HABIT_TEXT).filter((k) => r.person.habits[k]);
-  const concept = [
-    {
-      title: mis.length ? `잘못 알고 있는 표현 ${mis.length}개${shown.size ? ' (* 이 글에 드러난 것)' : ''}` : '잘못 알고 있는 표현',
-      lines: mis.length ? wrapItems(mis.map((id) => misconceptionLabel(id) + (shown.has(id) ? '*' : '')), MAX_INNER) : [empty('없음')],
-    },
-    { title: '성향', lines: habits.length ? habits.map((k) => HABIT_TEXT[k]) : [empty('특별한 습관 없음')] },
-  ];
-  const mistakes = [
-    { lines: r.changes.length ? r.changes.map((c) => `[${c.category}] ${c.rule} (${c.from} → ${c.to})`) : [empty('저지른 실수가 없음')] },
-  ];
-  // 두 상자를 더 넓은 쪽 너비로 맞춘다
-  const inner = Math.max(innerWidth(concept), innerWidth(mistakes));
+  const left = column(
+    [
+      {
+        title: `잘못 알고 있는 표현 (${mis.length}개)`,
+        note: shown.size ? '  * 이 글에 드러난 것' : '',
+        lines: mis.length ? wrapItems(mis.map((id) => misconceptionLabel(id) + (shown.has(id) ? '*' : '')), inner) : [empty('없음')],
+      },
+      { title: `성향 (${habits.length}개)`, lines: habits.length ? habits.map((k) => HABIT_TEXT[k]) : [empty('특별한 습관 없음')] },
+    ],
+    inner,
+  );
+  const right = column(
+    [
+      {
+        title: `실수 (${r.stats.flaws}개)`,
+        lines: r.changes.length ? r.changes.map((c) => `[${c.category}] ${c.rule} (${c.from} → ${c.to})`) : [empty('저지른 실수가 없음')],
+      },
+    ],
+    inner,
+  );
   const lines = [
     '',
-    `• Seed: ${r.seed}`,
-    `• Level: ${r.level}`,
-    `• Profile: ${r.profile}`,
+    `• Seed: ${cyan(r.seed)}`,
+    `• Level: ${yellow(r.level)}`,
+    `• Profile: ${white(r.profile)}`,
     '',
-    '글쓴이 컨셉',
-    ...box(concept, inner),
+    ...table(left, right, colW),
     '',
-    `실수 ${r.stats.flaws}개`,
-    ...box(mistakes, inner),
+    ...sideBySide(original, r.text, { columns, color: COLOR }),
   ];
   process.stderr.write(lines.join('\n') + '\n');
 }
@@ -206,7 +259,7 @@ async function main() {
     if (opts.report) process.stderr.write('\nresult:\n');
     process.stdout.write(result.text.endsWith('\n') ? result.text : `${result.text}\n`);
   }
-  if (opts.report) printReport(result);
+  if (opts.report) printReport(text, result);
 }
 
 main().catch((e) => {
